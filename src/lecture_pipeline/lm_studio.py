@@ -59,14 +59,26 @@ def _messages(system: str, user: str) -> list[dict[str, str]]:
     ]
 
 
+def _derive_native_base_url(openai_base_url: str) -> str:
+    if openai_base_url.rstrip("/").endswith("/v1"):
+        return openai_base_url.rstrip("/").removesuffix("/v1")
+    return openai_base_url.rstrip("/")
+
+
 class LMStudioClient:
     def __init__(self, settings: Settings, *, profile: PromptProfile | None = None):
         self.settings = settings
         self.profile = profile or get_profile("vorlesung")
         self.client = httpx.Client(base_url=settings.lm_studio_base_url, timeout=settings.request_timeout_seconds)
+        self.native_client = httpx.Client(
+            base_url=_derive_native_base_url(settings.lm_studio_base_url),
+            timeout=settings.request_timeout_seconds,
+        )
+        self._loaded_model: str | None = None
 
     def close(self) -> None:
         self.client.close()
+        self.native_client.close()
 
     def list_models(self) -> list[str]:
         response = self.client.get("/models")
@@ -74,8 +86,17 @@ class LMStudioClient:
         payload = response.json()
         return [item["id"] for item in payload.get("data", [])]
 
-    def chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+    def ensure_model_loaded(self) -> str:
         model = self.profile.lm_studio_model or self.settings.lm_studio_model
+        if self._loaded_model == model:
+            return model
+        response = self.native_client.post("/api/v1/models/load", json={"model": model})
+        response.raise_for_status()
+        self._loaded_model = model
+        return model
+
+    def chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+        model = self.ensure_model_loaded()
         payload = {
             "model": model,
             "temperature": self.profile.temperature,
