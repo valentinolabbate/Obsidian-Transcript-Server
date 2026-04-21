@@ -10,7 +10,20 @@ from .models import SpeakerProfile, TranscriptSegment
 
 
 _DIARIZATION_PIPELINE = None
+_DIARIZATION_DEVICE = None
 _DIARIZATION_PIPELINE_LOCK = Lock()
+
+
+def _resolve_device(configured_device: str) -> str:
+    if configured_device == "auto":
+        try:
+            import torch
+            if torch.backends.mps.is_available():
+                return "mps"
+        except ImportError:
+            pass
+        return "cpu"
+    return configured_device
 
 
 def _segment_overlap(start_a: float, end_a: float, start_b: float, end_b: float) -> float:
@@ -19,26 +32,39 @@ def _segment_overlap(start_a: float, end_a: float, start_b: float, end_b: float)
 
 def _get_diarization_pipeline(
     hf_token: str,
+    device: str = "cpu",
     progress_callback: Callable[[int, str], None] | None = None,
 ):
-    global _DIARIZATION_PIPELINE
-    if _DIARIZATION_PIPELINE is not None:
+    global _DIARIZATION_PIPELINE, _DIARIZATION_DEVICE
+    if _DIARIZATION_PIPELINE is not None and _DIARIZATION_DEVICE == device:
         return _DIARIZATION_PIPELINE
 
     with _DIARIZATION_PIPELINE_LOCK:
-        if _DIARIZATION_PIPELINE is not None:
+        if _DIARIZATION_PIPELINE is not None and _DIARIZATION_DEVICE == device:
             return _DIARIZATION_PIPELINE
         if progress_callback:
-            progress_callback(58, "Speaker-Modell wird geladen.")
+            progress_callback(58, f"Speaker-Modell wird geladen ({device.upper()}).")
         from pyannote.audio import Pipeline  # type: ignore
+        import torch
 
-        _DIARIZATION_PIPELINE = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", token=hf_token)
-        return _DIARIZATION_PIPELINE
+        pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", token=hf_token)
+        pipeline.to(torch.device(device))
+        _DIARIZATION_PIPELINE = pipeline
+        _DIARIZATION_DEVICE = device
+        return pipeline
+
+
+def _clear_diarization_cache() -> None:
+    global _DIARIZATION_PIPELINE, _DIARIZATION_DEVICE
+    with _DIARIZATION_PIPELINE_LOCK:
+        _DIARIZATION_PIPELINE = None
+        _DIARIZATION_DEVICE = None
 
 
 def diarize_audio(
     audio_path: Path,
     hf_token: str | None,
+    configured_device: str = "auto",
     progress_callback: Callable[[int, str], None] | None = None,
 ) -> list[tuple[float, float, str]]:
     if not hf_token:
@@ -49,10 +75,12 @@ def diarize_audio(
     except ImportError:
         return []
 
+    device = _resolve_device(configured_device)
+
     try:
-        pipeline = _get_diarization_pipeline(hf_token, progress_callback=progress_callback)
+        pipeline = _get_diarization_pipeline(hf_token, device=device, progress_callback=progress_callback)
         if progress_callback:
-            progress_callback(62, "Speaker-Diarization-Inferenz laeuft.")
+            progress_callback(62, f"Speaker-Diarization-Inferenz laeuft ({device.upper()}).")
         diarization = pipeline(str(audio_path))
         annotation = getattr(diarization, "exclusive_speaker_diarization", None)
         if annotation is None:
@@ -64,6 +92,26 @@ def diarize_audio(
             progress_callback(64, f"Speaker-Diarization erkannte {len(results)} Segmente.")
         return results
     except Exception as exc:
+        if device != "cpu":
+            warnings.warn(f"Diarization auf {device.upper()} fehlgeschlagen, fallback auf CPU: {exc}", stacklevel=2)
+            _clear_diarization_cache()
+            try:
+                pipeline = _get_diarization_pipeline(hf_token, device="cpu", progress_callback=progress_callback)
+                if progress_callback:
+                    progress_callback(62, "Speaker-Diarization-Inferenz laeuft (CPU Fallback).")
+                diarization = pipeline(str(audio_path))
+                annotation = getattr(diarization, "exclusive_speaker_diarization", None)
+                if annotation is None:
+                    annotation = getattr(diarization, "speaker_diarization", diarization)
+                results: list[tuple[float, float, str]] = []
+                for segment, _, speaker in annotation.itertracks(yield_label=True):
+                    results.append((float(segment.start), float(segment.end), str(speaker)))
+                if progress_callback:
+                    progress_callback(64, f"Speaker-Diarization (CPU) erkannte {len(results)} Segmente.")
+                return results
+            except Exception as exc2:
+                warnings.warn(f"Diarization CPU fallback auch fehlgeschlagen: {exc2}", stacklevel=2)
+                return []
         warnings.warn(f"Diarization fallback aktiv: {exc}", stacklevel=2)
         return []
 

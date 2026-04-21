@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
     lm_studio_model: str = "qwen/qwen3.6-35b-a3b"
     transcription_model: str = "mlx-community/whisper-large-v3-turbo"
+    diarization_device: str = "auto"  # auto | mps | cpu
     chunk_target_chars: int = 14000
     request_timeout_seconds: float = 300.0
     idle_shutdown_seconds: int = 900

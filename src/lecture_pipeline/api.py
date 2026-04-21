@@ -123,12 +123,20 @@ def _load_job_snapshot(job_id: str) -> JobStatusSnapshot | None:
 def health() -> dict:
     _ensure_watchdog()
     _touch_activity()
+    mps_available = False
+    try:
+        import torch
+        mps_available = torch.backends.mps.is_available()
+    except ImportError:
+        pass
     return {
         "status": "ok",
         "vault_root": str(settings.resolved_vault_root),
         "inbox_dir": str(settings.resolved_inbox_dir),
         "lm_studio_base_url": settings.lm_studio_base_url,
         "lm_studio_model": settings.lm_studio_model,
+        "diarization_device": settings.diarization_device,
+        "mps_available": mps_available,
         "idle_shutdown_seconds": settings.idle_shutdown_seconds,
     }
 

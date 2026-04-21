@@ -281,6 +281,7 @@ def process_lecture(
             diarization_segments = diarize_audio(
                 prepared_audio,
                 settings.hf_token,
+                configured_device=settings.diarization_device,
                 progress_callback=lambda progress, message: update_job(
                     "running",
                     stage="diarization",

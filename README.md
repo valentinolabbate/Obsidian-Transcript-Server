@@ -35,6 +35,23 @@ cp .env.example .env
 - `ffmpeg`
 - LM Studio Server auf `http://127.0.0.1:1234/v1`
 - optional: `HF_TOKEN` fuer `pyannote.audio`
+- Apple Silicon Mac fuer MPS-GPU-Beschleunigung (optional)
+
+## Apple Silicon GPU (MPS)
+
+Die Speaker-Diarization nutzt automatisch die Apple Silicon GPU (MPS), wenn verfuegbar:
+
+- `auto` (Default): MPS wird automatisch erkannt und genutzt
+- `mps`: Erzwingt MPS (Apple Silicon GPU)
+- `cpu`: Erzwingt CPU-Fallback
+
+Ueber die Umgebungsvariable konfigurierbar:
+
+```bash
+export LECTURE_PIPELINE_DIARIZATION_DEVICE=mps  # oder cpu, auto
+```
+
+Falls MPS fehlschlaegt, wird automatisch auf CPU zurueckgefallen.
 
 ## CLI
 

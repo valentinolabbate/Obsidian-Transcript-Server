@@ -39,11 +39,20 @@ def health() -> None:
     mlx_available = importlib.util.find_spec("mlx_whisper") is not None
     pyannote_available = importlib.util.find_spec("pyannote.audio") is not None
 
+    mps_available = False
+    try:
+        import torch
+        mps_available = torch.backends.mps.is_available()
+    except ImportError:
+        pass
+
     typer.echo(f"Vault root: {settings.resolved_vault_root}")
     typer.echo(f"Inbox: {settings.resolved_inbox_dir}")
     typer.echo(f"FFmpeg: {'ja' if shutil.which('ffmpeg') else 'nein'}")
     typer.echo(f"mlx-whisper: {'ja' if mlx_available else 'nein'}")
     typer.echo(f"pyannote.audio: {'ja' if pyannote_available else 'nein'}")
+    typer.echo(f"MPS (Apple Silicon GPU): {'ja' if mps_available else 'nein'}")
+    typer.echo(f"Diarization-Geraet: {settings.diarization_device}")
     typer.echo(f"HF-Token konfiguriert: {'ja' if settings.hf_token else 'nein'}")
     typer.echo(f"LM Studio Modelle: {', '.join(models)}")
 
