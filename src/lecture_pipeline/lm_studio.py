@@ -6,51 +6,13 @@ import httpx
 
 from .config import Settings
 from .models import ChunkSummary, NoteSections
+from .prompts import PromptProfile, get_profile
 from .utils import extract_json_object
 
+CHUNK_SYSTEM_SUFFIX = " Gib nur JSON zurueck."
+NOTE_SYSTEM_SUFFIX = " Gib nur JSON zurueck."
 
-def _messages(system: str, user: str) -> list[dict[str, str]]:
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
-
-
-class LMStudioClient:
-    def __init__(self, settings: Settings):
-        self.settings = settings
-        self.client = httpx.Client(base_url=settings.lm_studio_base_url, timeout=settings.request_timeout_seconds)
-
-    def close(self) -> None:
-        self.client.close()
-
-    def list_models(self) -> list[str]:
-        response = self.client.get("/models")
-        response.raise_for_status()
-        payload = response.json()
-        return [item["id"] for item in payload.get("data", [])]
-
-    def chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        payload = {
-            "model": self.settings.lm_studio_model,
-            "temperature": 0.1,
-            "top_p": 0.8,
-            "messages": messages,
-        }
-        response = self.client.post("/chat/completions", json=payload)
-        response.raise_for_status()
-        data = response.json()
-        content = data["choices"][0]["message"]["content"]
-        return extract_json_object(content)
-
-    def summarize_chunk(self, *, course: str, session_type: str, theme: str, date: str, chunk_text: str) -> ChunkSummary:
-        system = (
-            "Du analysierst deutsche Vorlesungstranskripte fuer Obsidian-Notizen. "
-            "Arbeite streng quellennah. Erfinde nichts. Speaker 1 ist wahrscheinlich die dozierende Person. "
-            "Ignoriere irrelevanten Smalltalk. Gib nur JSON zurueck."
-        )
-        user = f"""
-Kontext:
+CHUNK_USER_TEMPLATE = """Kontext:
 - Kurs: {course}
 - Sitzungstyp: {session_type}
 - Thema: {theme}
@@ -67,27 +29,9 @@ Gib genau JSON mit diesen Feldern zurueck:
 }}
 
 Transkript:
-{chunk_text}
-""".strip()
-        payload = self.chat_json(_messages(system, user))
-        return ChunkSummary.model_validate(payload)
+{chunk_text}"""
 
-    def synthesize_note(
-        self,
-        *,
-        course: str,
-        course_link: str,
-        session_type: str,
-        theme: str,
-        date: str,
-        chunk_summaries: list[ChunkSummary],
-    ) -> NoteSections:
-        system = (
-            "Du erstellst praezise deutschsprachige Vorlesungsnotizen fuer Obsidian. "
-            "Schreibe sachlich, knapp und fachlich. Erfinde nichts. Gib nur JSON zurueck."
-        )
-        user = f"""
-Metadaten:
+NOTE_USER_TEMPLATE = """Metadaten:
 - Kurs: {course}
 - KursLink: [[{course_link}]]
 - Datum: {date}
@@ -105,7 +49,75 @@ Erstelle JSON mit exakt diesen Feldern:
 }}
 
 Verdichtete Vorarbeit:
-{[summary.model_dump() for summary in chunk_summaries]}
-""".strip()
+{chunk_summaries}"""
+
+
+def _messages(system: str, user: str) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
+class LMStudioClient:
+    def __init__(self, settings: Settings, *, profile: PromptProfile | None = None):
+        self.settings = settings
+        self.profile = profile or get_profile("vorlesung")
+        self.client = httpx.Client(base_url=settings.lm_studio_base_url, timeout=settings.request_timeout_seconds)
+
+    def close(self) -> None:
+        self.client.close()
+
+    def list_models(self) -> list[str]:
+        response = self.client.get("/models")
+        response.raise_for_status()
+        payload = response.json()
+        return [item["id"] for item in payload.get("data", [])]
+
+    def chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+        model = self.profile.lm_studio_model or self.settings.lm_studio_model
+        payload = {
+            "model": model,
+            "temperature": self.profile.temperature,
+            "top_p": self.profile.top_p,
+            "messages": messages,
+        }
+        response = self.client.post("/chat/completions", json=payload)
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        return extract_json_object(content)
+
+    def summarize_chunk(self, *, course: str, session_type: str, theme: str, date: str, chunk_text: str) -> ChunkSummary:
+        system = self.profile.zusammenfassungs_stil + CHUNK_SYSTEM_SUFFIX
+        user = CHUNK_USER_TEMPLATE.format(
+            course=course,
+            session_type=session_type,
+            theme=theme,
+            date=date,
+            chunk_text=chunk_text,
+        )
+        payload = self.chat_json(_messages(system, user))
+        return ChunkSummary.model_validate(payload)
+
+    def synthesize_note(
+        self,
+        *,
+        course: str,
+        course_link: str,
+        session_type: str,
+        theme: str,
+        date: str,
+        chunk_summaries: list[ChunkSummary],
+    ) -> NoteSections:
+        system = self.profile.notiz_stil + NOTE_SYSTEM_SUFFIX
+        user = NOTE_USER_TEMPLATE.format(
+            course=course,
+            course_link=course_link,
+            session_type=session_type,
+            theme=theme,
+            date=date,
+            chunk_summaries=[summary.model_dump() for summary in chunk_summaries],
+        )
         payload = self.chat_json(_messages(system, user))
         return NoteSections.model_validate(payload)

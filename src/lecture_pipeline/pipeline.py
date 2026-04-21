@@ -12,6 +12,7 @@ from .lm_studio import LMStudioClient
 from .markdown import render_note_markdown, render_transcript_markdown
 from .models import ChunkSummary, LectureRequest, NoteSections, PipelineResult, SpeakerProfile, TranscriptSegment
 from .paths import build_pipeline_paths
+from .prompts import PromptProfile, get_profile
 from .storage import (
     delete_path,
     find_job_file_for_id,
@@ -317,7 +318,20 @@ def process_lecture(
 
         note_sections = _fallback_note_sections(merged_segments)
         chunk_summaries: list[ChunkSummary] = []
-        client = LMStudioClient(settings)
+
+        profile = get_profile(request.prompt_profile)
+        if request.zusammenfassungs_stil is not None:
+            profile.zusammenfassungs_stil = request.zusammenfassungs_stil
+        if request.notiz_stil is not None:
+            profile.notiz_stil = request.notiz_stil
+        if request.lm_studio_model is not None:
+            profile.lm_studio_model = request.lm_studio_model
+        if request.temperature is not None:
+            profile.temperature = request.temperature
+        if request.top_p is not None:
+            profile.top_p = request.top_p
+
+        client = LMStudioClient(settings, profile=profile)
         try:
             chunks = _chunk_segments(merged_segments, settings.chunk_target_chars)
             total_chunks = len(chunks)

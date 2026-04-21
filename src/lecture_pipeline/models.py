@@ -26,6 +26,12 @@ class LectureRequest(BaseModel):
     template_path: Path | None = None
     storage_dir: Path | None = None
     output_dir: Path | None = None
+    prompt_profile: str = "vorlesung"
+    zusammenfassungs_stil: str | None = None
+    notiz_stil: str | None = None
+    lm_studio_model: str | None = None
+    temperature: float | None = None
+    top_p: float | None = None
 
     @model_validator(mode="after")
     def validate_source(self) -> "LectureRequest":
