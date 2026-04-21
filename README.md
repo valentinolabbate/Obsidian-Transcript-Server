@@ -1,6 +1,8 @@
-# Obsidian Lecture Pipeline
+# Obsidian Transcript Server
 
-Lokale Pipeline fuer Vorlesungsaufnahmen im Obsidian Vault:
+Backend fuer die Obsidian-Transcript-GUI. Verwaltet die lokale Pipeline fuer Vorlesungsaufnahmen.
+
+## Funktionen
 
 - Audio aus einer Inbox oder einem beliebigen Pfad uebernehmen
 - lokal transkribieren
@@ -9,14 +11,23 @@ Lokale Pipeline fuer Vorlesungsaufnahmen im Obsidian Vault:
 - ueber LM Studio strukturierte Vorlesungsnotizen erzeugen
 - Rohtranskripte und fertige Sitzungsnotizen in den Vault schreiben
 
-## Ordnerkonzept
+## Installation (automatisch)
 
-- Aufnahme-Inbox: `99_Inbox/Audio/`
-- Pro Kurs:
-  - `Rohdaten/Audio/`
-  - `Rohdaten/Transkripte/`
-  - `Rohdaten/Jobs/`
-  - `Sitzungen/`
+Das empfohlene Setup ist ueber das [Obsidian-Transcript-GUI](https://github.com/valentinolabbate/Obsidian-Transcript-GUI)-Plugin. Das Plugin laedt dieses Backend automatisch herunter, erstellt eine Python-Umgebung und installiert alles selbststaendig.
+
+## Manuelle Installation
+
+Falls du das Backend eigenstaendig betreiben moechtest:
+
+```bash
+git clone https://github.com/valentinolabbate/Obsidian-Transcript-Server.git
+cd Obsidian-Transcript-Server
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+pip install -e .[audio]
+cp .env.example .env
+```
 
 ## Voraussetzungen
 
@@ -24,16 +35,6 @@ Lokale Pipeline fuer Vorlesungsaufnahmen im Obsidian Vault:
 - `ffmpeg`
 - LM Studio Server auf `http://127.0.0.1:1234/v1`
 - optional: `HF_TOKEN` fuer `pyannote.audio`
-
-## Setup
-
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-pip install -e .[audio]
-cp .env.example .env
-```
 
 ## CLI
 
@@ -54,32 +55,16 @@ lecture-pipeline process \
   --theme "Paneldaten und Fixed Effects"
 ```
 
-Alternativ aus der Inbox heraus:
-
-```bash
-lecture-pipeline process \
-  --audio "99_Inbox/Audio/deine-datei.m4a" \
-  --course Oekonometrie \
-  --date 2026-04-21 \
-  --session-type Vorlesung \
-  --theme "Paneldaten und Fixed Effects"
-```
-
 API starten:
 
 ```bash
 lecture-pipeline serve --host 127.0.0.1 --port 8765
 ```
 
-## Status
+## API
 
-Der aktuelle Stand ist ein robuster Backend-MVP mit:
-
-- Konfiguration
-- CLI und HTTP-API
-- Rohdatenablage
-- LM-Studio-Client
-- Markdown-Rendering
-- Fallback-Logik fuer fehlende ASR-/Diarization-Abhaengigkeiten
-
-Der naechste Schritt ist ein echter Testlauf mit kurzer Audiodatei nach Installation der Laufzeitabhaengigkeiten.
+- `GET /health`
+- `POST /process`
+- `POST /jobs`
+- `GET /jobs/{job_id}`
+- `POST /jobs/{job_id}/cancel`
