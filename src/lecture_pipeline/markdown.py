@@ -60,7 +60,7 @@ def render_transcript_markdown(
     ) or "- "
     transcript_lines = []
     for segment in segments:
-        label = segment.display_label or segment.base_label or segment.raw_speaker or "Speaker 1 (Prof)"
+        label = segment.display_label or segment.base_label or segment.raw_speaker or "Speaker 1"
         transcript_lines.append(
             f"[{format_timestamp(segment.start)} - {format_timestamp(segment.end)}] {label}:\n{segment.text}"
         )

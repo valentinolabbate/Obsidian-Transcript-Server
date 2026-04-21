@@ -38,7 +38,7 @@ def _chunk_segments(segments: list[TranscriptSegment], target_chars: int) -> lis
     current_lines: list[str] = []
     current_chars = 0
     for segment in segments:
-        label = segment.display_label or segment.base_label or segment.raw_speaker or "Speaker 1 (Prof)"
+        label = segment.display_label or segment.base_label or segment.raw_speaker or "Speaker 1"
         line = f"[{segment.start:.2f}-{segment.end:.2f}] {label}: {segment.text}"
         if current_lines and current_chars + len(line) > target_chars:
             chunks.append("\n".join(current_lines))
@@ -292,7 +292,11 @@ def process_lecture(
             )
             update_job("running", stage="diarization", progress=65, message="Speaker werden dem Transkript zugeordnet.")
             check_cancel(65, "diarization", "Job wurde waehrend der Speaker-Zuordnung abgebrochen.")
-            merged_segments, speakers = merge_speakers(segments, diarization_segments)
+            merged_segments, speakers = merge_speakers(
+                segments,
+                diarization_segments,
+                speaker_label_mode=request.speaker_label_mode,
+            )
             write_segments_json(paths.transcript_json_path, merged_segments)
             register_cleanup_target(paths.transcript_json_path)
             update_job(

@@ -119,6 +119,8 @@ def diarize_audio(
 def merge_speakers(
     transcript_segments: list[TranscriptSegment],
     diarization_segments: list[tuple[float, float, str]],
+    *,
+    speaker_label_mode: str = "professor",
 ) -> tuple[list[TranscriptSegment], list[SpeakerProfile]]:
     if not transcript_segments:
         return [], []
@@ -165,7 +167,7 @@ def merge_speakers(
     ranked_labels = [label for label, _ in sorted(durations.items(), key=lambda item: item[1], reverse=True)]
     label_map: dict[str, SpeakerProfile] = {}
     for index, raw_label in enumerate(ranked_labels, start=1):
-        is_prof = index == 1
+        is_prof = speaker_label_mode == "professor" and index == 1
         label_map[raw_label] = SpeakerProfile(
             raw_label=raw_label,
             base_label=f"Speaker {index}",

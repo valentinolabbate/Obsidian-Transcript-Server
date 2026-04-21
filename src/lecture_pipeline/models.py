@@ -32,6 +32,7 @@ class LectureRequest(BaseModel):
     lm_studio_model: str | None = None
     temperature: float | None = None
     top_p: float | None = None
+    speaker_label_mode: Literal["professor", "generic"] = "professor"
 
     @model_validator(mode="after")
     def validate_source(self) -> "LectureRequest":
