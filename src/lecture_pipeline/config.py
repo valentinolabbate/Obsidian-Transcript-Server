@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="LECTURE_PIPELINE_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    vault_root: Path | None = None
+    study_root: str = "10_Studium"
+    semester_path: str = "1_Semester_Master_WiWi"
+    inbox_dir: str = "99_Inbox/Audio"
+    lm_studio_base_url: str = "http://127.0.0.1:1234/v1"
+    lm_studio_model: str = "qwen/qwen3.6-35b-a3b"
+    transcription_model: str = "mlx-community/whisper-large-v3-turbo"
+    chunk_target_chars: int = 14000
+    request_timeout_seconds: float = 300.0
+    idle_shutdown_seconds: int = 900
+    hf_token: str | None = Field(default=None, alias="HF_TOKEN")
+
+    @property
+    def resolved_vault_root(self) -> Path:
+        if self.vault_root:
+            return self.vault_root.expanduser().resolve()
+        return Path(__file__).resolve().parents[4]
+
+    @property
+    def resolved_inbox_dir(self) -> Path:
+        return (self.resolved_vault_root / self.inbox_dir).resolve()
+
+    @property
+    def resolved_study_root(self) -> Path:
+        return (self.resolved_vault_root / self.study_root / self.semester_path).resolve()
+
+
+settings = Settings()
