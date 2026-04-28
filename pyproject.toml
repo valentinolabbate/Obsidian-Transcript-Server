@@ -1,6 +1,6 @@
 [project]
 name = "obsidian-lecture-pipeline"
-version = "0.2.7"
+version = "0.2.8"
 description = "Local lecture transcription and summarization pipeline for Obsidian"
 readme = "README.md"
 requires-python = ">=3.11"

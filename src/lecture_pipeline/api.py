@@ -9,6 +9,7 @@ from time import monotonic, sleep
 from fastapi import FastAPI
 from fastapi import HTTPException
 
+from . import __version__
 from .config import settings
 from .models import JobListResponse, JobStartResponse, JobStatusSnapshot, LectureRequest
 from .pipeline import JobCancelledError, load_job_status, prepare_job, process_lecture
@@ -133,6 +134,7 @@ def health() -> dict:
         pass
     return {
         "status": "ok",
+        "version": __version__,
         "vault_root": str(settings.resolved_vault_root),
         "inbox_dir": str(settings.resolved_inbox_dir),
         "lm_studio_base_url": settings.lm_studio_base_url,
@@ -140,7 +142,20 @@ def health() -> dict:
         "diarization_device": settings.diarization_device,
         "mps_available": mps_available,
         "idle_shutdown_seconds": settings.idle_shutdown_seconds,
+        "request_timeout_seconds": settings.request_timeout_seconds,
     }
+
+
+@app.post("/shutdown")
+def shutdown() -> dict:
+    _touch_activity()
+
+    def stop_server() -> None:
+        sleep(0.2)
+        os._exit(0)
+
+    Thread(target=stop_server, daemon=True, name="lecture-pipeline-shutdown").start()
+    return {"status": "shutting_down"}
 
 
 @app.post("/process")
