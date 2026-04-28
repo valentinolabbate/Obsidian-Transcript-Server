@@ -9,16 +9,22 @@ from .models import ChunkSummary, NoteSections
 from .prompts import PromptProfile, get_profile
 from .utils import extract_json_object
 
-CHUNK_SYSTEM_SUFFIX = " Gib nur JSON zurueck."
-NOTE_SYSTEM_SUFFIX = " Gib nur JSON zurueck."
+JSON_ONLY_SUFFIX = (
+    " Gib nur ein gueltiges JSON-Objekt zurueck. "
+    "Schreibe keine Begruendung, kein Markdown und keinen Codeblock."
+)
+CHUNK_SYSTEM_SUFFIX = JSON_ONLY_SUFFIX
+NOTE_SYSTEM_SUFFIX = JSON_ONLY_SUFFIX
 
-CHUNK_USER_TEMPLATE = """Kontext:
+CHUNK_USER_TEMPLATE = """/no_think
+
+Kontext:
 - Kurs: {course}
 - Sitzungstyp: {session_type}
 - Thema: {theme}
 - Datum: {date}
 
-Gib genau JSON mit diesen Feldern zurueck:
+Gib genau ein gueltiges JSON-Objekt mit diesen Feldern zurueck:
 {{
   "kernaussagen": [],
   "begriffe": [{{"begriff": "", "erklaerung": ""}}],
@@ -31,14 +37,16 @@ Gib genau JSON mit diesen Feldern zurueck:
 Transkript:
 {chunk_text}"""
 
-NOTE_USER_TEMPLATE = """Metadaten:
+NOTE_USER_TEMPLATE = """/no_think
+
+Metadaten:
 - Kurs: {course}
 - KursLink: [[{course_link}]]
 - Datum: {date}
 - Sitzungstyp: {session_type}
 - Thema: {theme}
 
-Erstelle JSON mit exakt diesen Feldern:
+Erstelle genau ein gueltiges JSON-Objekt mit exakt diesen Feldern:
 {{
   "zusammenfassung": [],
   "notizen": [],
@@ -128,7 +136,14 @@ class LMStudioClient:
         except httpx.HTTPStatusError as exc:
             raise LMStudioRequestError(_format_http_error(exc, action="/chat/completions")) from exc
         data = response.json()
-        content = data["choices"][0]["message"]["content"]
+        message = data["choices"][0]["message"]
+        content = (message.get("content") or "").strip()
+        if not content and message.get("reasoning_content"):
+            raise LMStudioRequestError(
+                "LM Studio hat nur reasoning_content ohne normale Antwort geliefert. "
+                "Deaktiviere Thinking/Reasoning im Modell oder nutze ein Instruct-Modell, "
+                "das JSON in message.content ausgibt."
+            )
         return extract_json_object(content)
 
     def summarize_chunk(self, *, course: str, session_type: str, theme: str, date: str, chunk_text: str) -> ChunkSummary:
