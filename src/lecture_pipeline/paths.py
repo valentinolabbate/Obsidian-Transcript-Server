@@ -7,7 +7,7 @@ from .models import LectureRequest, PipelinePaths
 from .utils import canonical_stem, ensure_directory, sanitize_filename_part
 
 
-def _render_request_path(template: str, request: LectureRequest) -> str:
+def render_request_path(template: str, request: LectureRequest) -> str:
     replacements = {
         "course": request.course,
         "context": request.course,
@@ -25,7 +25,7 @@ def _render_request_path(template: str, request: LectureRequest) -> str:
 
 
 def _resolve_request_directory(vault_root: Path, configured_path: Path | str, request: LectureRequest) -> Path:
-    rendered = _render_request_path(str(configured_path), request)
+    rendered = render_request_path(str(configured_path), request)
     candidate = Path(rendered).expanduser()
     if candidate.is_absolute():
         return candidate.resolve()

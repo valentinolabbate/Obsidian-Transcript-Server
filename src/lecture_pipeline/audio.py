@@ -38,6 +38,9 @@ def preprocess_audio(source: Path, destination: Path) -> Path:
     if not ffmpeg_bin:
         return source
 
+    if source.resolve() == destination.resolve():
+        return source
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     command = [
         ffmpeg_bin,

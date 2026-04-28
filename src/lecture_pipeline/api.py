@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from .config import settings
 from .models import JobListResponse, JobStartResponse, JobStatusSnapshot, LectureRequest
-from .pipeline import load_job_status, prepare_job, process_lecture
+from .pipeline import JobCancelledError, load_job_status, prepare_job, process_lecture
 from .storage import write_job_status
 
 
@@ -104,6 +104,8 @@ def _run_background_job(request: LectureRequest, job_id: str, created_at, source
             paths=paths,
             should_cancel=cancel_event.is_set if cancel_event else None,
         )
+    except JobCancelledError:
+        pass
     finally:
         _set_job_thread(job_id, None)
         _set_cancel_event(job_id, None)

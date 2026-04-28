@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 
 from .models import LectureRequest, NoteSections, SpeakerProfile, TranscriptSegment
+from .paths import render_request_path
 from .storage import build_note_link
 from .utils import format_timestamp
 
@@ -28,10 +29,10 @@ def _render_term_bullets(items: list[dict[str, str]]) -> str:
     return "\n".join(lines) or "- "
 
 
-def _resolve_optional_template_path(vault_root: Path, template_path: Path | None) -> Path | None:
+def _resolve_optional_template_path(vault_root: Path, template_path: Path | None, request: LectureRequest) -> Path | None:
     if not template_path:
         return None
-    candidate = Path(template_path).expanduser()
+    candidate = Path(render_request_path(str(template_path), request)).expanduser()
     if candidate.is_absolute():
         return candidate.resolve()
     return (vault_root / candidate).resolve()
@@ -128,7 +129,7 @@ def render_note_markdown(
         "naechste_schritte": _render_bullets(note_sections.naechste_schritte),
     }
 
-    resolved_template_path = _resolve_optional_template_path(vault_root, template_path)
+    resolved_template_path = _resolve_optional_template_path(vault_root, template_path, request)
     if resolved_template_path:
         template = resolved_template_path.read_text(encoding="utf-8")
         return _render_note_template(template, context)

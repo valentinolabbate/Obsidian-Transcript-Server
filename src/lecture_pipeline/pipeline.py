@@ -334,6 +334,7 @@ def process_lecture(
             profile.temperature = request.temperature
         if request.top_p is not None:
             profile.top_p = request.top_p
+        actual_summary_model = profile.lm_studio_model or settings.lm_studio_model
 
         client = LMStudioClient(settings, profile=profile)
         try:
@@ -384,7 +385,7 @@ def process_lecture(
             audio_path=canonical_audio_path,
             speaker_count=len(speakers),
             transcription_model=transcription_model,
-            summary_model=settings.lm_studio_model,
+            summary_model=actual_summary_model,
             template_path=request.template_path,
         )
         paths.note_path.write_text(note_markdown, encoding="utf-8")
@@ -399,7 +400,7 @@ def process_lecture(
             transcript_path=str(transcript_markdown_path),
             speaker_count=len(speakers),
             segment_count=len(merged_segments),
-            summary_model=settings.lm_studio_model,
+            summary_model=actual_summary_model,
         )
 
         return PipelineResult(
@@ -410,7 +411,7 @@ def process_lecture(
             speakers=speakers,
             segment_count=len(merged_segments),
             note_sections=note_sections,
-            summary_model=settings.lm_studio_model,
+            summary_model=actual_summary_model,
             transcription_model=transcription_model,
         )
     except JobCancelledError:
