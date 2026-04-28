@@ -82,10 +82,11 @@ class LMStudioClient:
     def __init__(self, settings: Settings, *, profile: PromptProfile | None = None):
         self.settings = settings
         self.profile = profile or get_profile("vorlesung")
-        self.client = httpx.Client(base_url=settings.lm_studio_base_url, timeout=settings.request_timeout_seconds)
+        timeout = httpx.Timeout(settings.request_timeout_seconds, connect=30.0, write=30.0, pool=30.0)
+        self.client = httpx.Client(base_url=settings.lm_studio_base_url, timeout=timeout)
         self.native_client = httpx.Client(
             base_url=_derive_native_base_url(settings.lm_studio_base_url),
-            timeout=settings.request_timeout_seconds,
+            timeout=timeout,
         )
         self._loaded_model: str | None = None
 

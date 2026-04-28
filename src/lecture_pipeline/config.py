@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     transcription_model: str = "mlx-community/whisper-large-v3-turbo"
     diarization_device: str = "auto"  # auto | mps | cpu
     chunk_target_chars: int = 14000
-    request_timeout_seconds: float = 300.0
+    request_timeout_seconds: float = 1800.0
     idle_shutdown_seconds: int = 900
     hf_token: str | None = Field(default=None, alias="HF_TOKEN")
 
