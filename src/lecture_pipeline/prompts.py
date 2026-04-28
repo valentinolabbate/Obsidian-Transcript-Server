@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
 
 
 @dataclass
@@ -55,4 +56,4 @@ DEFAULT_PROFILES: dict[str, PromptProfile] = {
 
 
 def get_profile(name: str) -> PromptProfile:
-    return DEFAULT_PROFILES.get(name, DEFAULT_PROFILES["vorlesung"])
+    return replace(DEFAULT_PROFILES.get(name, DEFAULT_PROFILES["vorlesung"]))

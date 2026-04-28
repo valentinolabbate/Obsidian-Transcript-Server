@@ -324,10 +324,10 @@ def process_lecture(
         chunk_summaries: list[ChunkSummary] = []
 
         profile = get_profile(request.prompt_profile)
-        if request.zusammenfassungs_stil is not None:
-            profile.zusammenfassungs_stil = request.zusammenfassungs_stil
-        if request.notiz_stil is not None:
-            profile.notiz_stil = request.notiz_stil
+        if request.zusammenfassungs_stil and request.zusammenfassungs_stil.strip():
+            profile.zusammenfassungs_stil = request.zusammenfassungs_stil.strip()
+        if request.notiz_stil and request.notiz_stil.strip():
+            profile.notiz_stil = request.notiz_stil.strip()
         if request.lm_studio_model is not None:
             profile.lm_studio_model = request.lm_studio_model
         if request.temperature is not None:

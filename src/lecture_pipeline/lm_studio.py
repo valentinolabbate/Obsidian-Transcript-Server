@@ -65,6 +65,19 @@ def _derive_native_base_url(openai_base_url: str) -> str:
     return openai_base_url.rstrip("/")
 
 
+class LMStudioRequestError(RuntimeError):
+    pass
+
+
+def _format_http_error(error: httpx.HTTPStatusError, *, action: str) -> str:
+    response = error.response
+    body = response.text.strip()
+    details = f"LM Studio Fehler bei {action}: HTTP {response.status_code} {response.reason_phrase}"
+    if body:
+        details = f"{details}\n{body}"
+    return details
+
+
 class LMStudioClient:
     def __init__(self, settings: Settings, *, profile: PromptProfile | None = None):
         self.settings = settings
@@ -90,8 +103,13 @@ class LMStudioClient:
         model = self.profile.lm_studio_model or self.settings.lm_studio_model
         if self._loaded_model == model:
             return model
-        response = self.native_client.post("/api/v1/models/load", json={"model": model})
-        response.raise_for_status()
+        try:
+            response = self.native_client.post("/api/v1/models/load", json={"model": model})
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            # LM Studio versions differ in native model-loading support. A failed
+            # eager load should not prevent the OpenAI-compatible chat request.
+            return model
         self._loaded_model = model
         return model
 
@@ -103,8 +121,11 @@ class LMStudioClient:
             "top_p": self.profile.top_p,
             "messages": messages,
         }
-        response = self.client.post("/chat/completions", json=payload)
-        response.raise_for_status()
+        try:
+            response = self.client.post("/chat/completions", json=payload)
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise LMStudioRequestError(_format_http_error(exc, action="/chat/completions")) from exc
         data = response.json()
         content = data["choices"][0]["message"]["content"]
         return extract_json_object(content)
