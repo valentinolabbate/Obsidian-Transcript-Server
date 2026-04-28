@@ -3,7 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import Field
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+MIN_REQUEST_TIMEOUT_SECONDS = 1800.0
 
 
 class Settings(BaseSettings):
@@ -23,9 +27,14 @@ class Settings(BaseSettings):
     transcription_model: str = "mlx-community/whisper-large-v3-turbo"
     diarization_device: str = "auto"  # auto | mps | cpu
     chunk_target_chars: int = 14000
-    request_timeout_seconds: float = 1800.0
+    request_timeout_seconds: float = MIN_REQUEST_TIMEOUT_SECONDS
     idle_shutdown_seconds: int = 900
     hf_token: str | None = Field(default=None, alias="HF_TOKEN")
+
+    @field_validator("request_timeout_seconds")
+    @classmethod
+    def enforce_minimum_request_timeout(cls, value: float) -> float:
+        return max(float(value), MIN_REQUEST_TIMEOUT_SECONDS)
 
     @property
     def resolved_vault_root(self) -> Path:
