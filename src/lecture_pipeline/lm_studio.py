@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -129,16 +130,37 @@ class LMStudioClient:
             "temperature": self.profile.temperature,
             "top_p": self.profile.top_p,
             "messages": messages,
+            "stream": True,
         }
+        content_parts: list[str] = []
+        saw_reasoning = False
         try:
-            response = self.client.post("/chat/completions", json=payload)
-            response.raise_for_status()
+            with self.client.stream("POST", "/chat/completions", json=payload) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line.removeprefix("data:").strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    choices = event.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    content = delta.get("content")
+                    if content:
+                        content_parts.append(content)
+                    if delta.get("reasoning_content"):
+                        saw_reasoning = True
         except httpx.HTTPStatusError as exc:
             raise LMStudioRequestError(_format_http_error(exc, action="/chat/completions")) from exc
-        data = response.json()
-        message = data["choices"][0]["message"]
-        content = (message.get("content") or "").strip()
-        if not content and message.get("reasoning_content"):
+
+        content = "".join(content_parts).strip()
+        if not content and saw_reasoning:
             raise LMStudioRequestError(
                 "LM Studio hat nur reasoning_content ohne normale Antwort geliefert. "
                 "Deaktiviere Thinking/Reasoning im Modell oder nutze ein Instruct-Modell, "
