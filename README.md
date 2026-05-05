@@ -7,8 +7,10 @@ Backend fuer die Obsidian-Transcript-GUI. Verwaltet die lokale Pipeline fuer Vor
 - Audio aus einer Inbox oder einem beliebigen Pfad uebernehmen
 - lokal transkribieren
 - Speaker-Diarization lokal ausfuehren
+- optional Transkription und Speaker-Diarization parallel ausfuehren
 - den laengsten Sprecher als `Speaker 1 (Prof)` markieren
 - ueber LM Studio strukturierte Vorlesungsnotizen erzeugen
+- verwendete ASR-, Diarization- und LM-Studio-Modelle nach Nutzung entladen
 - Rohtranskripte und fertige Sitzungsnotizen in den Vault schreiben
 
 ## Installation (automatisch)
@@ -52,6 +54,14 @@ export LECTURE_PIPELINE_DIARIZATION_DEVICE=mps  # oder cpu, auto
 ```
 
 Falls MPS fehlschlaegt, wird automatisch auf CPU zurueckgefallen.
+
+## Parallele Audio-Analyse
+
+Nach der Audio-Vorverarbeitung koennen Transkription und Speaker-Diarization optional parallel laufen. Das veraendert die Ergebnisse nicht, kann aber mehr Speicher und Rechenleistung gleichzeitig beanspruchen. Standard ist deshalb deaktiviert.
+
+```bash
+export LECTURE_PIPELINE_PARALLEL_AUDIO_ANALYSIS=true
+```
 
 ## CLI
 

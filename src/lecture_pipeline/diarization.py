@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import gc
 from pathlib import Path
 from threading import Lock
 from typing import Callable
@@ -36,29 +37,54 @@ def _get_diarization_pipeline(
     progress_callback: Callable[[int, str], None] | None = None,
 ):
     global _DIARIZATION_PIPELINE, _DIARIZATION_DEVICE
-    if _DIARIZATION_PIPELINE is not None and _DIARIZATION_DEVICE == device:
-        return _DIARIZATION_PIPELINE
+    if progress_callback:
+        progress_callback(58, f"Speaker-Modell wird geladen ({device.upper()}).")
+    from pyannote.audio import Pipeline  # type: ignore
+    import torch
 
-    with _DIARIZATION_PIPELINE_LOCK:
-        if _DIARIZATION_PIPELINE is not None and _DIARIZATION_DEVICE == device:
-            return _DIARIZATION_PIPELINE
-        if progress_callback:
-            progress_callback(58, f"Speaker-Modell wird geladen ({device.upper()}).")
-        from pyannote.audio import Pipeline  # type: ignore
-        import torch
-
-        pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", token=hf_token)
-        pipeline.to(torch.device(device))
-        _DIARIZATION_PIPELINE = pipeline
-        _DIARIZATION_DEVICE = device
-        return pipeline
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", token=hf_token)
+    pipeline.to(torch.device(device))
+    _DIARIZATION_PIPELINE = pipeline
+    _DIARIZATION_DEVICE = device
+    return pipeline
 
 
 def _clear_diarization_cache() -> None:
     global _DIARIZATION_PIPELINE, _DIARIZATION_DEVICE
-    with _DIARIZATION_PIPELINE_LOCK:
-        _DIARIZATION_PIPELINE = None
-        _DIARIZATION_DEVICE = None
+    _DIARIZATION_PIPELINE = None
+    _DIARIZATION_DEVICE = None
+    gc.collect()
+    try:
+        import torch
+
+        if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+            torch.mps.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _collect_diarization_results(
+    pipeline,
+    audio_path: Path,
+    *,
+    progress_callback: Callable[[int, str], None] | None = None,
+    inference_message: str,
+    complete_message: str,
+) -> list[tuple[float, float, str]]:
+    if progress_callback:
+        progress_callback(62, inference_message)
+    diarization = pipeline(str(audio_path))
+    annotation = getattr(diarization, "exclusive_speaker_diarization", None)
+    if annotation is None:
+        annotation = getattr(diarization, "speaker_diarization", diarization)
+    results: list[tuple[float, float, str]] = []
+    for segment, _, speaker in annotation.itertracks(yield_label=True):
+        results.append((float(segment.start), float(segment.end), str(speaker)))
+    if progress_callback:
+        progress_callback(64, complete_message.format(count=len(results)))
+    return results
 
 
 def diarize_audio(
@@ -77,43 +103,36 @@ def diarize_audio(
 
     device = _resolve_device(configured_device)
 
-    try:
-        pipeline = _get_diarization_pipeline(hf_token, device=device, progress_callback=progress_callback)
-        if progress_callback:
-            progress_callback(62, f"Speaker-Diarization-Inferenz laeuft ({device.upper()}).")
-        diarization = pipeline(str(audio_path))
-        annotation = getattr(diarization, "exclusive_speaker_diarization", None)
-        if annotation is None:
-            annotation = getattr(diarization, "speaker_diarization", diarization)
-        results: list[tuple[float, float, str]] = []
-        for segment, _, speaker in annotation.itertracks(yield_label=True):
-            results.append((float(segment.start), float(segment.end), str(speaker)))
-        if progress_callback:
-            progress_callback(64, f"Speaker-Diarization erkannte {len(results)} Segmente.")
-        return results
-    except Exception as exc:
-        if device != "cpu":
-            warnings.warn(f"Diarization auf {device.upper()} fehlgeschlagen, fallback auf CPU: {exc}", stacklevel=2)
+    with _DIARIZATION_PIPELINE_LOCK:
+        try:
+            pipeline = _get_diarization_pipeline(hf_token, device=device, progress_callback=progress_callback)
+            return _collect_diarization_results(
+                pipeline,
+                audio_path,
+                progress_callback=progress_callback,
+                inference_message=f"Speaker-Diarization-Inferenz laeuft ({device.upper()}).",
+                complete_message="Speaker-Diarization erkannte {count} Segmente.",
+            )
+        except Exception as exc:
+            if device != "cpu":
+                warnings.warn(f"Diarization auf {device.upper()} fehlgeschlagen, fallback auf CPU: {exc}", stacklevel=2)
+                _clear_diarization_cache()
+                try:
+                    pipeline = _get_diarization_pipeline(hf_token, device="cpu", progress_callback=progress_callback)
+                    return _collect_diarization_results(
+                        pipeline,
+                        audio_path,
+                        progress_callback=progress_callback,
+                        inference_message="Speaker-Diarization-Inferenz laeuft (CPU Fallback).",
+                        complete_message="Speaker-Diarization (CPU) erkannte {count} Segmente.",
+                    )
+                except Exception as exc2:
+                    warnings.warn(f"Diarization CPU fallback auch fehlgeschlagen: {exc2}", stacklevel=2)
+                    return []
+            warnings.warn(f"Diarization fallback aktiv: {exc}", stacklevel=2)
+            return []
+        finally:
             _clear_diarization_cache()
-            try:
-                pipeline = _get_diarization_pipeline(hf_token, device="cpu", progress_callback=progress_callback)
-                if progress_callback:
-                    progress_callback(62, "Speaker-Diarization-Inferenz laeuft (CPU Fallback).")
-                diarization = pipeline(str(audio_path))
-                annotation = getattr(diarization, "exclusive_speaker_diarization", None)
-                if annotation is None:
-                    annotation = getattr(diarization, "speaker_diarization", diarization)
-                results: list[tuple[float, float, str]] = []
-                for segment, _, speaker in annotation.itertracks(yield_label=True):
-                    results.append((float(segment.start), float(segment.end), str(speaker)))
-                if progress_callback:
-                    progress_callback(64, f"Speaker-Diarization (CPU) erkannte {len(results)} Segmente.")
-                return results
-            except Exception as exc2:
-                warnings.warn(f"Diarization CPU fallback auch fehlgeschlagen: {exc2}", stacklevel=2)
-                return []
-        warnings.warn(f"Diarization fallback aktiv: {exc}", stacklevel=2)
-        return []
 
 
 def merge_speakers(

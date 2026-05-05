@@ -53,6 +53,7 @@ def health() -> None:
     typer.echo(f"pyannote.audio: {'ja' if pyannote_available else 'nein'}")
     typer.echo(f"MPS (Apple Silicon GPU): {'ja' if mps_available else 'nein'}")
     typer.echo(f"Diarization-Geraet: {settings.diarization_device}")
+    typer.echo(f"Parallele Audio-Analyse: {'ja' if settings.parallel_audio_analysis else 'nein'}")
     typer.echo(f"HF-Token konfiguriert: {'ja' if settings.hf_token else 'nein'}")
     typer.echo(f"LM Studio Modelle: {', '.join(models)}")
 

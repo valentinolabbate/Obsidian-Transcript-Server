@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from threading import Lock
 from typing import Any
 
 import httpx
@@ -16,6 +17,8 @@ JSON_ONLY_SUFFIX = (
 )
 CHUNK_SYSTEM_SUFFIX = JSON_ONLY_SUFFIX
 NOTE_SYSTEM_SUFFIX = JSON_ONLY_SUFFIX
+_LM_STUDIO_MODEL_LOCK = Lock()
+_LM_STUDIO_LOADED_MODEL: str | None = None
 
 CHUNK_USER_TEMPLATE = """/no_think
 
@@ -100,8 +103,12 @@ class LMStudioClient:
         self._loaded_model: str | None = None
 
     def close(self) -> None:
-        self.client.close()
-        self.native_client.close()
+        try:
+            with _LM_STUDIO_MODEL_LOCK:
+                self.unload_loaded_model()
+        finally:
+            self.client.close()
+            self.native_client.close()
 
     def list_models(self) -> list[str]:
         response = self.client.get("/models")
@@ -110,8 +117,10 @@ class LMStudioClient:
         return [item["id"] for item in payload.get("data", [])]
 
     def ensure_model_loaded(self) -> str:
+        global _LM_STUDIO_LOADED_MODEL
         model = self.profile.lm_studio_model or self.settings.lm_studio_model
-        if self._loaded_model == model:
+        if _LM_STUDIO_LOADED_MODEL == model:
+            self._loaded_model = model
             return model
         try:
             response = self.native_client.post("/api/v1/models/load", json={"model": model})
@@ -119,54 +128,74 @@ class LMStudioClient:
         except httpx.HTTPStatusError:
             # LM Studio versions differ in native model-loading support. A failed
             # eager load should not prevent the OpenAI-compatible chat request.
+            self._loaded_model = model
             return model
         self._loaded_model = model
+        _LM_STUDIO_LOADED_MODEL = model
         return model
 
-    def chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        model = self.ensure_model_loaded()
-        payload = {
-            "model": model,
-            "temperature": self.profile.temperature,
-            "top_p": self.profile.top_p,
-            "messages": messages,
-            "stream": True,
-        }
-        content_parts: list[str] = []
-        saw_reasoning = False
+    def unload_loaded_model(self) -> None:
+        global _LM_STUDIO_LOADED_MODEL
+        model = self._loaded_model
+        if not model:
+            return
         try:
-            with self.client.stream("POST", "/chat/completions", json=payload) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    data = line.removeprefix("data:").strip()
-                    if not data or data == "[DONE]":
-                        continue
-                    try:
-                        event = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    choices = event.get("choices") or []
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta") or {}
-                    content = delta.get("content")
-                    if content:
-                        content_parts.append(content)
-                    if delta.get("reasoning_content"):
-                        saw_reasoning = True
-        except httpx.HTTPStatusError as exc:
-            raise LMStudioRequestError(_format_http_error(exc, action="/chat/completions")) from exc
+            response = self.native_client.post("/api/v1/models/unload", json={"model": model})
+            response.raise_for_status()
+        except httpx.HTTPError:
+            # Some LM Studio versions do not expose native unload support.
+            pass
+        finally:
+            if _LM_STUDIO_LOADED_MODEL == model:
+                _LM_STUDIO_LOADED_MODEL = None
+            if self._loaded_model == model:
+                self._loaded_model = None
 
-        content = "".join(content_parts).strip()
-        if not content and saw_reasoning:
-            raise LMStudioRequestError(
-                "LM Studio hat nur reasoning_content ohne normale Antwort geliefert. "
-                "Deaktiviere Thinking/Reasoning im Modell oder nutze ein Instruct-Modell, "
-                "das JSON in message.content ausgibt."
-            )
-        return extract_json_object(content)
+    def chat_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+        with _LM_STUDIO_MODEL_LOCK:
+            model = self.ensure_model_loaded()
+            payload = {
+                "model": model,
+                "temperature": self.profile.temperature,
+                "top_p": self.profile.top_p,
+                "messages": messages,
+                "stream": True,
+            }
+            content_parts: list[str] = []
+            saw_reasoning = False
+            try:
+                with self.client.stream("POST", "/chat/completions", json=payload) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data = line.removeprefix("data:").strip()
+                        if not data or data == "[DONE]":
+                            continue
+                        try:
+                            event = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        choices = event.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        content = delta.get("content")
+                        if content:
+                            content_parts.append(content)
+                        if delta.get("reasoning_content"):
+                            saw_reasoning = True
+            except httpx.HTTPStatusError as exc:
+                raise LMStudioRequestError(_format_http_error(exc, action="/chat/completions")) from exc
+
+            content = "".join(content_parts).strip()
+            if not content and saw_reasoning:
+                raise LMStudioRequestError(
+                    "LM Studio hat nur reasoning_content ohne normale Antwort geliefert. "
+                    "Deaktiviere Thinking/Reasoning im Modell oder nutze ein Instruct-Modell, "
+                    "das JSON in message.content ausgibt."
+                )
+            return extract_json_object(content)
 
     def summarize_chunk(self, *, course: str, session_type: str, theme: str, date: str, chunk_text: str) -> ChunkSummary:
         system = self.profile.zusammenfassungs_stil + CHUNK_SYSTEM_SUFFIX

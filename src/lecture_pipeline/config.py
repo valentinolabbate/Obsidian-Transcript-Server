@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     lm_studio_model: str = "qwen/qwen3.6-35b-a3b"
     transcription_model: str = "mlx-community/whisper-large-v3-turbo"
     diarization_device: str = "auto"  # auto | mps | cpu
+    parallel_audio_analysis: bool = False
     chunk_target_chars: int = 14000
     request_timeout_seconds: float = MIN_REQUEST_TIMEOUT_SECONDS
     idle_shutdown_seconds: int = 900

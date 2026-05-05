@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Callable
 from uuid import uuid4
 
@@ -156,18 +158,25 @@ def process_lecture(
             created_at=created_at,
         )
 
+    job_update_lock = Lock()
+    last_progress = 0
+
     def update_job(status: str, *, stage: str, progress: int, message: str, **extra: object) -> None:
-        write_job_status(
-            paths.job_path,
-            {
-                "job_id": job_id,
-                "status": status,
-                "stage": stage,
-                "progress": progress,
-                "message": message,
-                **extra,
-            },
-        )
+        nonlocal last_progress
+        with job_update_lock:
+            progress = max(progress, last_progress)
+            last_progress = progress
+            write_job_status(
+                paths.job_path,
+                {
+                    "job_id": job_id,
+                    "status": status,
+                    "stage": stage,
+                    "progress": progress,
+                    "message": message,
+                    **extra,
+                },
+            )
 
     cleanup_targets: list[Path] = []
 
@@ -261,35 +270,88 @@ def process_lecture(
                 prepared_audio=str(prepared_audio),
             )
 
-            update_job("running", stage="transcription", progress=30, message="Transkription laeuft.")
-            check_cancel(30, "transcription", "Job wurde vor der Transkription abgebrochen.")
-            try:
-                segments, transcription_model = transcribe_audio(prepared_audio, settings.transcription_model)
-            except TranscriptionUnavailableError as exc:
-                raise RuntimeError(f"Transkription noch nicht verfuegbar: {exc}") from exc
-
-            update_job(
-                "running",
-                stage="transcription",
-                progress=48,
-                message="Transkription abgeschlossen.",
-                segment_count=len(segments),
-                transcription_model=transcription_model,
-            )
-
-            update_job("running", stage="diarization", progress=56, message="Speaker-Diarization wird vorbereitet.")
-            check_cancel(56, "diarization", "Job wurde vor der Speaker-Diarization abgebrochen.")
-            diarization_segments = diarize_audio(
-                prepared_audio,
-                settings.hf_token,
-                configured_device=settings.diarization_device,
-                progress_callback=lambda progress, message: update_job(
+            if settings.parallel_audio_analysis:
+                update_job(
                     "running",
-                    stage="diarization",
-                    progress=progress,
-                    message=message,
-                ),
-            )
+                    stage="audio_analysis",
+                    progress=30,
+                    message="Transkription und Speaker-Diarization laufen parallel.",
+                )
+                check_cancel(30, "audio_analysis", "Job wurde vor der Audio-Analyse abgebrochen.")
+
+                def update_parallel_diarization(progress: int, message: str) -> None:
+                    mapped_progress = 36 + int(max(0, min(progress - 58, 6)) / 6 * 22)
+                    update_job(
+                        "running",
+                        stage="audio_analysis",
+                        progress=mapped_progress,
+                        message=message,
+                    )
+
+                with ThreadPoolExecutor(max_workers=2, thread_name_prefix="lecture-audio-analysis") as executor:
+                    transcription_future = executor.submit(transcribe_audio, prepared_audio, settings.transcription_model)
+                    diarization_future = executor.submit(
+                        diarize_audio,
+                        prepared_audio,
+                        settings.hf_token,
+                        configured_device=settings.diarization_device,
+                        progress_callback=update_parallel_diarization,
+                    )
+                    try:
+                        segments, transcription_model = transcription_future.result()
+                    except TranscriptionUnavailableError as exc:
+                        diarization_future.result()
+                        raise RuntimeError(f"Transkription noch nicht verfuegbar: {exc}") from exc
+
+                    update_job(
+                        "running",
+                        stage="audio_analysis",
+                        progress=58,
+                        message="Transkription abgeschlossen. Speaker-Diarization laeuft ggf. noch.",
+                        segment_count=len(segments),
+                        transcription_model=transcription_model,
+                    )
+                    check_cancel(58, "audio_analysis", "Job wurde waehrend der Audio-Analyse abgebrochen.")
+                    diarization_segments = diarization_future.result()
+
+                update_job(
+                    "running",
+                    stage="audio_analysis",
+                    progress=65,
+                    message="Transkription und Speaker-Diarization abgeschlossen.",
+                    segment_count=len(segments),
+                    transcription_model=transcription_model,
+                )
+            else:
+                update_job("running", stage="transcription", progress=30, message="Transkription laeuft.")
+                check_cancel(30, "transcription", "Job wurde vor der Transkription abgebrochen.")
+                try:
+                    segments, transcription_model = transcribe_audio(prepared_audio, settings.transcription_model)
+                except TranscriptionUnavailableError as exc:
+                    raise RuntimeError(f"Transkription noch nicht verfuegbar: {exc}") from exc
+
+                update_job(
+                    "running",
+                    stage="transcription",
+                    progress=48,
+                    message="Transkription abgeschlossen.",
+                    segment_count=len(segments),
+                    transcription_model=transcription_model,
+                )
+
+                update_job("running", stage="diarization", progress=56, message="Speaker-Diarization wird vorbereitet.")
+                check_cancel(56, "diarization", "Job wurde vor der Speaker-Diarization abgebrochen.")
+                diarization_segments = diarize_audio(
+                    prepared_audio,
+                    settings.hf_token,
+                    configured_device=settings.diarization_device,
+                    progress_callback=lambda progress, message: update_job(
+                        "running",
+                        stage="diarization",
+                        progress=progress,
+                        message=message,
+                    ),
+                )
             update_job("running", stage="diarization", progress=65, message="Speaker werden dem Transkript zugeordnet.")
             check_cancel(65, "diarization", "Job wurde waehrend der Speaker-Zuordnung abgebrochen.")
             merged_segments, speakers = merge_speakers(
